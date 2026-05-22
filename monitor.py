@@ -1,17 +1,20 @@
-from playwright.sync_api import sync_playwright
-import smtplib
-from email.mime.text import MIMEText
 import os
-import time
+import json
+import smtplib
+import feedparser
+from email.mime.text import MIMEText
+from urllib.parse import quote_plus
 
-URLS = {
-    "QUEST": "https://play.fiba3x3.com/events/quests",
-    "LITE QUEST": "https://play.fiba3x3.com/events/litequests"
-}
+SEEN_FILE = "seen_events.json"
 
 EMAIL_USER = os.environ["EMAIL_USER"]
 EMAIL_PASS = os.environ["EMAIL_PASS"]
 EMAIL_TO = os.environ["EMAIL_TO"]
+
+SEARCHES = {
+    "QUEST": 'site:play.fiba3x3.com/events Quest FIBA 3x3',
+    "LITE QUEST": 'site:play.fiba3x3.com/events "Lite Quest" FIBA 3x3'
+}
 
 
 def send_email(subject, body):
@@ -25,42 +28,104 @@ def send_email(subject, body):
         smtp.send_message(msg)
 
 
+def load_seen():
+    try:
+        with open(SEEN_FILE, "r") as f:
+            return json.load(f)
+    except:
+        return []
+
+
+def save_seen(data):
+    with open(SEEN_FILE, "w") as f:
+        json.dump(data, f)
+
+
+def estimate_level(title):
+    hard_words = ["Amsterdam", "Ub", "Liman", "Vienna", "Lausanne", "Belgrade", "Serbia"]
+
+    for word in hard_words:
+        if word.lower() in title.lower():
+            return "🔴 ALTO"
+
+    return "🟡 MEDIO / POR VERIFICAR"
+
+
+def estimate_opportunity(title):
+    hard_words = ["Amsterdam", "Ub", "Liman", "Serbia"]
+
+    for word in hard_words:
+        if word.lower() in title.lower():
+            return "🔴 BAJA"
+
+    return "🟢 INTERESANTE / REVISAR INSCRIPCIONES"
+
+
+def search_events():
+    events = []
+
+    for category, query in SEARCHES.items():
+        rss_url = f"https://www.bing.com/search?q={quote_plus(query)}&format=rss"
+        feed = feedparser.parse(rss_url)
+
+        for entry in feed.entries:
+            title = entry.get("title", "").strip()
+            link = entry.get("link", "").strip()
+            summary = entry.get("summary", "").strip()
+
+            if "play.fiba3x3.com" not in link:
+                continue
+
+            if "quest" not in title.lower() and "quest" not in summary.lower():
+                continue
+
+            events.append({
+                "id": link,
+                "name": title,
+                "type": category,
+                "link": link,
+                "summary": summary,
+                "level": estimate_level(title),
+                "opportunity": estimate_opportunity(title)
+            })
+
+    unique = []
+    seen_links = set()
+
+    for e in events:
+        if e["id"] not in seen_links:
+            unique.append(e)
+            seen_links.add(e["id"])
+
+    return unique
+
+
 def main():
-    body = "🔎 DIAGNÓSTICO FIBA PLAY\n\n"
+    seen = load_seen()
+    current = search_events()
 
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
+    new_events = [
+        e for e in current
+        if e["id"] not in seen
+    ]
 
-        page = browser.new_page(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36"
-        )
+    if new_events:
+        body = "🏀 NUEVOS POSIBLES QUEST / LITE QUEST DETECTADOS\n\n"
+        body += "Fuente: búsqueda indexada Bing sobre FIBA Play.\n"
+        body += "⚠️ Verificar manualmente inscripción, fecha y nivel competitivo.\n\n"
 
-        for category, url in URLS.items():
-            body += f"===== {category} =====\n"
-            body += f"URL: {url}\n\n"
+        for e in new_events:
+            body += f"{e['name']}\n"
+            body += f"🏆 Tipo detectado: {e['type']}\n"
+            body += f"🔥 Nivel estimado: {e['level']}\n"
+            body += f"🎯 Oportunidad: {e['opportunity']}\n"
+            body += f"📝 Resumen: {e['summary'][:500]}\n"
+            body += f"🔗 {e['link']}\n\n"
 
-            try:
-                response = page.goto(url, wait_until="networkidle", timeout=60000)
-                time.sleep(8)
+        send_email("🏀 Nuevos QUEST / LITE QUEST detectados", body)
 
-                body += f"Status: {response.status if response else 'sin respuesta'}\n"
-                body += f"Title: {page.title()}\n"
-                body += f"Current URL: {page.url}\n\n"
-
-                text = page.locator("body").inner_text(timeout=10000)
-                links = page.locator("a").count()
-
-                body += f"Número de links detectados: {links}\n\n"
-                body += "Primeros 3000 caracteres visibles:\n"
-                body += text[:3000]
-                body += "\n\n"
-
-            except Exception as e:
-                body += f"ERROR:\n{e}\n\n"
-
-        browser.close()
-
-    send_email("🔎 Diagnóstico FIBA Play", body)
+    current_ids = [e["id"] for e in current]
+    save_seen(current_ids)
 
 
 if __name__ == "__main__":
