@@ -16,6 +16,7 @@ EMAIL_USER = os.environ["EMAIL_USER"]
 EMAIL_PASS = os.environ["EMAIL_PASS"]
 EMAIL_TO = os.environ["EMAIL_TO"]
 
+
 def load_seen():
     try:
         with open(SEEN_FILE, "r") as f:
@@ -23,12 +24,21 @@ def load_seen():
     except:
         return []
 
+
 def save_seen(data):
     with open(SEEN_FILE, "w") as f:
         json.dump(data, f)
 
+
 def estimate_level(name):
-    elite_keywords = ["Amsterdam", "Ub", "Liman", "Vienna", "Lausanne"]
+
+    elite_keywords = [
+        "Amsterdam",
+        "Ub",
+        "Liman",
+        "Vienna",
+        "Lausanne"
+    ]
 
     for word in elite_keywords:
         if word.lower() in name.lower():
@@ -36,8 +46,14 @@ def estimate_level(name):
 
     return "🟡 MEDIO"
 
+
 def estimate_opportunity(name):
-    hard_keywords = ["Amsterdam", "Ub", "Liman"]
+
+    hard_keywords = [
+        "Amsterdam",
+        "Ub",
+        "Liman"
+    ]
 
     for word in hard_keywords:
         if word.lower() in name.lower():
@@ -45,22 +61,33 @@ def estimate_opportunity(name):
 
     return "🟢 INTERESANTE"
 
+
 def get_events():
+
     events = []
 
     for category, url in URLS.items():
-        headers = {
-    "User-Agent": "Mozilla/5.0"
-}
 
-response = requests.get(url, headers=headers, timeout=20)
-response.raise_for_status()
-html = response.text
+        headers = {
+            "User-Agent": "Mozilla/5.0"
+        }
+
+        response = requests.get(
+            url,
+            headers=headers,
+            timeout=20
+        )
+
+        response.raise_for_status()
+
+        html = response.text
+
         soup = BeautifulSoup(html, "html.parser")
 
         links = soup.find_all("a")
 
         for link in links:
+
             text = link.get_text(strip=True)
 
             if "Quest" in text or "QUEST" in text:
@@ -84,11 +111,15 @@ html = response.text
     names = set()
 
     for e in events:
+
         if e["name"] not in names:
+
             unique.append(e)
+
             names.add(e["name"])
 
     return unique
+
 
 def send_email(new_events):
 
@@ -105,12 +136,17 @@ def send_email(new_events):
     msg = MIMEText(body)
 
     msg["Subject"] = "🏀 Nuevos QUEST / LITE QUEST"
+
     msg["From"] = EMAIL_USER
+
     msg["To"] = EMAIL_TO
 
     with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
+
         smtp.login(EMAIL_USER, EMAIL_PASS)
+
         smtp.send_message(msg)
+
 
 def main():
 
@@ -120,7 +156,10 @@ def main():
 
     current_names = [e["name"] for e in current]
 
-    new_events = [e for e in current if e["name"] not in seen]
+    new_events = [
+        e for e in current
+        if e["name"] not in seen
+    ]
 
     if new_events:
         send_email(new_events)
