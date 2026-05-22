@@ -114,11 +114,11 @@ def main():
 
     current_names = [e["name"] for e in current]
 
-    new_events = [e for e in current if e["name"] not in seen]
+new_events = [e for e in current if e["name"] not in seen]
 
-   send_email(current)
+send_email(current)
 
-    save_seen(current_names)
+save_seen(current_names)
 
 if __name__ == "__main__":
     main()
