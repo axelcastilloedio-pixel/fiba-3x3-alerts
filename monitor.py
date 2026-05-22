@@ -5,10 +5,10 @@ import smtplib
 from email.mime.text import MIMEText
 import os
 
-URLS = [
-    "https://play.fiba3x3.com/events/quests",
-    "https://play.fiba3x3.com/events/litequests"
-]
+URLS = {
+    "QUEST": "https://play.fiba3x3.com/events/quests",
+    "LITE QUEST": "https://play.fiba3x3.com/events/litequests"
+}
 
 SEEN_FILE = "seen_events.json"
 
@@ -27,10 +27,28 @@ def save_seen(data):
     with open(SEEN_FILE, "w") as f:
         json.dump(data, f)
 
+def estimate_level(name):
+    elite_keywords = ["Amsterdam", "Ub", "Liman", "Vienna", "Lausanne"]
+
+    for word in elite_keywords:
+        if word.lower() in name.lower():
+            return "🔴 ALTO"
+
+    return "🟡 MEDIO"
+
+def estimate_opportunity(name):
+    hard_keywords = ["Amsterdam", "Ub", "Liman"]
+
+    for word in hard_keywords:
+        if word.lower() in name.lower():
+            return "🔴 BAJA"
+
+    return "🟢 INTERESANTE"
+
 def get_events():
     events = []
 
-    for url in URLS:
+    for category, url in URLS.items():
         html = requests.get(url).text
         soup = BeautifulSoup(html, "html.parser")
 
@@ -40,19 +58,47 @@ def get_events():
             text = link.get_text(strip=True)
 
             if "Quest" in text or "QUEST" in text:
-                events.append(text)
 
-    return list(set(events))
+                href = link.get("href")
+
+                if href and "/events/" in href:
+
+                    full_link = "https://play.fiba3x3.com" + href
+
+                    events.append({
+                        "name": text,
+                        "type": category,
+                        "link": full_link,
+                        "level": estimate_level(text),
+                        "opportunity": estimate_opportunity(text)
+                    })
+
+    unique = []
+
+    names = set()
+
+    for e in events:
+        if e["name"] not in names:
+            unique.append(e)
+            names.add(e["name"])
+
+    return unique
 
 def send_email(new_events):
-    body = "Nuevos torneos detectados:\n\n"
 
-    for event in new_events:
-        body += f"- {event}\n"
+    body = "🏀 NUEVOS TORNEOS FIBA 3x3 DETECTADOS\n\n"
+
+    for e in new_events:
+
+        body += f"{e['name']}\n"
+        body += f"🏆 Tipo: {e['type']}\n"
+        body += f"🔥 Nivel estimado: {e['level']}\n"
+        body += f"🎯 Oportunidad: {e['opportunity']}\n"
+        body += f"🔗 {e['link']}\n\n"
 
     msg = MIMEText(body)
 
-    msg["Subject"] = "🏀 Nuevos QUEST / LITE QUEST FIBA 3x3"
+    msg["Subject"] = "🏀 Nuevos QUEST / LITE QUEST"
     msg["From"] = EMAIL_USER
     msg["To"] = EMAIL_TO
 
@@ -61,16 +107,19 @@ def send_email(new_events):
         smtp.send_message(msg)
 
 def main():
+
     seen = load_seen()
+
     current = get_events()
 
-    new_events = [e for e in current if e not in seen]
+    current_names = [e["name"] for e in current]
+
+    new_events = [e for e in current if e["name"] not in seen]
 
     if new_events:
-    send_email(new_events)
-        
+        send_email(new_events)
 
-    save_seen(current)
+    save_seen(current_names)
 
 if __name__ == "__main__":
     main()
