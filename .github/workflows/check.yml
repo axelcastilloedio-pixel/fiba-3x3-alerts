@@ -21,6 +21,9 @@ jobs:
       - name: Instalar dependencias
         run: pip install -r requirements.txt
 
+      - name: Instalar navegadores Playwright
+        run: python -m playwright install --with-deps chromium
+
       - name: Ejecutar monitor
         env:
           EMAIL_USER: ${{ secrets.EMAIL_USER }}
