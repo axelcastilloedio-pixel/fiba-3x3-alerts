@@ -116,8 +116,7 @@ def main():
 
     new_events = [e for e in current if e["name"] not in seen]
 
-    if new_events:
-        send_email(new_events)
+   send_email(current)
 
     save_seen(current_names)
 
