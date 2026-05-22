@@ -49,7 +49,13 @@ def get_events():
     events = []
 
     for category, url in URLS.items():
-        html = requests.get(url).text
+        headers = {
+    "User-Agent": "Mozilla/5.0"
+}
+
+response = requests.get(url, headers=headers, timeout=20)
+response.raise_for_status()
+html = response.text
         soup = BeautifulSoup(html, "html.parser")
 
         links = soup.find_all("a")
