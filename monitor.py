@@ -1,6 +1,7 @@
 import os
 import json
 import smtplib
+import requests
 import feedparser
 from email.mime.text import MIMEText
 from urllib.parse import quote_plus
@@ -12,29 +13,40 @@ EMAIL_PASS = os.environ["EMAIL_PASS"]
 EMAIL_TO = os.environ["EMAIL_TO"]
 
 SEARCHES = {
-    "QUEST": 'site:play.fiba3x3.com/events QUEST "2026" "FIBA 3x3"',
-    "LITE QUEST": 'site:play.fiba3x3.com/events "Lite Quest" "2026" "FIBA 3x3"',
-    "MAY_SEPT": 'site:play.fiba3x3.com/events Quest 2026 May OR June OR July OR August OR September'
+    "QUEST": 'site:play.fiba3x3.com/events QUEST "FIBA 3x3"',
+    "LITE QUEST": 'site:play.fiba3x3.com/events "Lite Quest" "FIBA 3x3"',
+    "GLOBAL_QUEST": '"3x3" "Quest" "FIBA"',
+    "BALKANS": '"3x3 turnir" Quest OR Prnjavor OR Bosnia OR Serbia OR Croatia',
+    "RUSSIAN": '"3x3 турнир" Quest OR "ФИБА 3x3"',
+    "GREEK": '"3x3 τουρνουά" Quest OR "FIBA 3x3"',
+    "ARABIC": '"3x3 بطولة" Quest OR "FIBA 3x3"',
+    "SPANISH": '"torneo 3x3" Quest OR "FIBA 3x3"',
+    "PORTUGUESE": '"torneio 3x3" Quest OR "FIBA 3x3"',
+    "FRENCH": '"tournoi 3x3" Quest OR "FIBA 3x3"',
 }
 
 HARD_SIGNALS = [
     "Amsterdam", "Ub", "Liman", "Vienna", "Lausanne",
-    "Serbia", "Belgrade", "Partizan", "Riffa", "Paris"
+    "Serbia", "Belgrade", "Partizan", "Riffa", "Paris",
+    "Ulaanbaatar", "Mongolia"
 ]
 
 GOOD_SIGNALS = [
     "Lite Quest", "Chile", "Malaysia", "Philippines",
-    "Korea", "Kosovo", "Romania", "Portugal", "Greece"
+    "Korea", "Kosovo", "Romania", "Portugal", "Greece",
+    "Bosnia", "Prnjavor", "Croatia"
 ]
 
 MONTHS = [
     "May", "June", "July", "August", "September",
-    "Mayo", "Junio", "Julio", "Agosto", "Septiembre"
+    "Mayo", "Junio", "Julio", "Agosto", "Septiembre",
+    "Maj", "Jun", "Jul", "Avgust", "Septembar",
+    "Μάιος", "Ιούνιος", "Ιούλιος", "Αύγουστος", "Σεπτέμβριος"
 ]
 
 
 def send_email(subject, body):
-    msg = MIMEText(body)
+    msg = MIMEText(body, "plain", "utf-8")
     msg["Subject"] = subject
     msg["From"] = EMAIL_USER
     msg["To"] = EMAIL_TO
@@ -55,6 +67,31 @@ def load_seen():
 def save_seen(data):
     with open(SEEN_FILE, "w") as f:
         json.dump(data, f)
+
+
+def translate_to_spanish(text):
+    if not text.strip():
+        return ""
+
+    try:
+        url = "https://api.mymemory.translated.net/get"
+        params = {
+            "q": text[:450],
+            "langpair": "auto|es"
+        }
+
+        response = requests.get(url, params=params, timeout=20)
+        data = response.json()
+
+        translated = data.get("responseData", {}).get("translatedText", "")
+
+        if translated:
+            return translated
+
+    except Exception:
+        pass
+
+    return "Traducción no disponible automáticamente."
 
 
 def score_event(title, summary):
@@ -100,13 +137,13 @@ def score_event(title, summary):
 def is_valid_event(title, summary, link):
     text = f"{title} {summary}".lower()
 
-    if "play.fiba3x3.com" not in link:
-        return False
+    valid_words = [
+        "quest", "lite quest", "fiba 3x3",
+        "3x3 turnir", "3x3 турнир", "3x3 τουρνουά",
+        "3x3 بطولة", "torneo 3x3", "torneio 3x3", "tournoi 3x3"
+    ]
 
-    if "quest" not in text:
-        return False
-
-    return True
+    return any(word.lower() in text for word in valid_words)
 
 
 def search_events():
@@ -126,12 +163,16 @@ def search_events():
 
             score, label, notes = score_event(title, summary)
 
+            original_text = f"{title}\n{summary}"
+            translation = translate_to_spanish(original_text)
+
             events.append({
                 "id": link,
                 "name": title,
                 "type": category,
                 "link": link,
                 "summary": summary,
+                "translation": translation,
                 "score": score,
                 "label": label,
                 "notes": notes
@@ -146,6 +187,7 @@ def search_events():
             seen_links.add(e["id"])
 
     unique.sort(key=lambda x: x["score"], reverse=True)
+
     return unique
 
 
@@ -159,23 +201,28 @@ def main():
     ]
 
     if new_events:
-        body = "🏀 NUEVOS QUEST / LITE QUEST DETECTADOS\n\n"
-        body += "Filtro: mayo–septiembre 2026 cuando Bing lo permite.\n"
-        body += "⚠️ Inscripciones/equipos aún requieren verificación manual porque FIBA bloquea GitHub.\n\n"
+        body = "🏀 NUEVOS POSIBLES QUEST / LITE QUEST INTERNACIONALES\n\n"
+        body += "Incluye búsquedas multilingües y traducción automática aproximada.\n"
+        body += "⚠️ Verificar siempre inscripción, fecha, plaza y nivel real.\n\n"
 
         for e in new_events:
             body += f"{e['name']}\n"
-            body += f"🏆 Tipo búsqueda: {e['type']}\n"
+            body += f"🏆 Fuente/búsqueda: {e['type']}\n"
             body += f"📊 Score oportunidad: {e['score']}/100\n"
             body += f"🎯 Lectura: {e['label']}\n"
 
             if e["notes"]:
                 body += "🧠 Señales: " + "; ".join(e["notes"]) + "\n"
 
-            body += f"📝 {e['summary'][:450]}\n"
-            body += f"🔗 {e['link']}\n\n"
+            body += f"\n🌍 Texto original:\n{e['summary'][:500]}\n"
+            body += f"\n🇪🇸 Traducción aproximada:\n{e['translation'][:700]}\n"
+            body += f"\n🔗 {e['link']}\n\n"
+            body += "-----------------------------\n\n"
 
-        send_email("🏀 Nuevas oportunidades QUEST / LITE QUEST", body)
+        send_email(
+            "🌍 Nuevos torneos 3x3 detectados",
+            body
+        )
 
     current_ids = [e["id"] for e in current]
     save_seen(current_ids)
