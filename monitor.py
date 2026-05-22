@@ -155,22 +155,13 @@ def get_events():
 
 def main():
 
-    seen = load_seen()
-
     current = get_events()
 
-    current_names = [e["name"] for e in current]
+    body = "🏀 EVENTOS DETECTADOS POR EL BOT\n\n"
 
-    new_events = [
-        e for e in current
-        if e["name"] not in seen
-    ]
+    if current:
 
-    if new_events:
-
-        body = "🏀 NUEVOS TORNEOS FIBA 3x3 DETECTADOS\n\n"
-
-        for e in new_events:
+        for e in current:
 
             body += f"{e['name']}\n"
             body += f"🏆 Tipo: {e['type']}\n"
@@ -178,12 +169,14 @@ def main():
             body += f"🎯 Oportunidad: {e['opportunity']}\n"
             body += f"🔗 {e['link']}\n\n"
 
-        send_email(
-            "🏀 Nuevos QUEST / LITE QUEST",
-            body
-        )
+    else:
 
-    save_seen(current_names)
+        body += "No se detectaron eventos.\n"
+
+    send_email(
+        "🏀 Test FIBA Bot",
+        body
+    )
 
 
 if __name__ == "__main__":
