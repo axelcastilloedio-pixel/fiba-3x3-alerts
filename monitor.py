@@ -13,14 +13,14 @@ EMAIL_PASS = os.environ["EMAIL_PASS"]
 EMAIL_TO = os.environ["EMAIL_TO"]
 
 SEARCHES = {
-    "QUEST": 'site:play.fiba3x3.com/events QUEST "FIBA 3x3"',
-    "LITE QUEST": 'site:play.fiba3x3.com/events "Lite Quest" "FIBA 3x3"',
-    "GLOBAL_QUEST": '"3x3 basketball" Quest "FIBA 3x3"',
-    "BALKANS": '"3x3 turnir" Quest OR Bosnia OR Serbia OR Croatia',
-    "RUSSIAN": '"3x3 турнир" Quest OR "ФИБА 3x3"',
-    "SPANISH": '"torneo 3x3" Quest OR "FIBA 3x3"',
-    "PORTUGUESE": '"torneio 3x3" Quest OR "FIBA 3x3"',
-    "FRENCH": '"tournoi 3x3" Quest OR "FIBA 3x3"',
+    "QUEST": 'site:play.fiba3x3.com/events QUEST "FIBA 3x3" 2026',
+    "LITE QUEST": 'site:play.fiba3x3.com/events "Lite Quest" "FIBA 3x3" 2026',
+    "GLOBAL_QUEST": '"3x3 basketball" Quest "FIBA 3x3" 2026',
+    "BALKANS": '"3x3 turnir" Quest 2026 OR Bosnia OR Serbia OR Croatia',
+    "RUSSIAN": '"3x3 турнир" Quest 2026 OR "ФИБА 3x3"',
+    "SPANISH": '"torneo 3x3" Quest 2026 OR "FIBA 3x3"',
+    "PORTUGUESE": '"torneio 3x3" Quest 2026 OR "FIBA 3x3"',
+    "FRENCH": '"tournoi 3x3" Quest 2026 OR "FIBA 3x3"',
 }
 
 HARD_SIGNALS = [
@@ -35,7 +35,7 @@ HARD_SIGNALS = [
     "Riffa",
     "Paris",
     "Ulaanbaatar",
-    "Mongolia"
+    "Mongolia",
 ]
 
 GOOD_SIGNALS = [
@@ -50,7 +50,7 @@ GOOD_SIGNALS = [
     "Greece",
     "Bosnia",
     "Prnjavor",
-    "Croatia"
+    "Croatia",
 ]
 
 MONTHS = [
@@ -59,17 +59,33 @@ MONTHS = [
     "July",
     "August",
     "September",
+    "October",
+    "November",
+    "December",
+    "2026",
+
     "Mayo",
     "Junio",
     "Julio",
     "Agosto",
     "Septiembre",
+    "Octubre",
+    "Noviembre",
+    "Diciembre",
+
+    "Maj",
+    "Jun",
+    "Jul",
+    "Avgust",
+    "Septembar",
+
+    "Μάιος",
+    "Ιούνιος",
+    "Ιούλιος",
+    "Αύγουστος",
+    "Σεπτέμβριος",
 ]
 
-
-# =========================
-# EMAIL
-# =========================
 
 def send_email(subject, body):
     msg = MIMEText(body, "plain", "utf-8")
@@ -81,10 +97,6 @@ def send_email(subject, body):
         smtp.login(EMAIL_USER, EMAIL_PASS)
         smtp.send_message(msg)
 
-
-# =========================
-# ARCHIVO DE EVENTOS
-# =========================
 
 def load_seen():
     try:
@@ -99,10 +111,6 @@ def save_seen(data):
         json.dump(data, f)
 
 
-# =========================
-# TRADUCCIÓN
-# =========================
-
 def translate_to_spanish(text):
     if not text.strip():
         return ""
@@ -112,16 +120,13 @@ def translate_to_spanish(text):
 
         params = {
             "q": text[:450],
-            "langpair": "en|es"
+            "langpair": "en|es",
         }
 
         response = requests.get(url, params=params, timeout=20)
         data = response.json()
 
-        translated = data.get("responseData", {}).get(
-            "translatedText",
-            ""
-        )
+        translated = data.get("responseData", {}).get("translatedText", "")
 
         if translated:
             return translated
@@ -131,10 +136,6 @@ def translate_to_spanish(text):
 
     return "Traducción no disponible automáticamente."
 
-
-# =========================
-# SCORE
-# =========================
 
 def score_event(title, summary):
     text = f"{title} {summary}"
@@ -157,7 +158,7 @@ def score_event(title, summary):
         notes.append("Lite Quest suele ser más accesible")
 
     if not any(m.lower() in text.lower() for m in MONTHS):
-        notes.append("fecha/mes no confirmado")
+        notes.append("fecha futura no confirmada")
 
     score = max(0, min(100, score))
 
@@ -173,17 +174,8 @@ def score_event(title, summary):
     return score, label, notes
 
 
-# =========================
-# FILTRO ANTI BASURA
-# =========================
-
 def is_valid_event(title, summary, link):
-
     text = f"{title} {summary} {link}".lower()
-
-    # =========================
-    # BLACKLIST
-    # =========================
 
     blacklist = [
         "meta quest",
@@ -207,23 +199,12 @@ def is_valid_event(title, summary, link):
         if bad in text:
             return False
 
-    # =========================
-    # DOMINIOS BUENOS
-    # =========================
-
     allowed_domains = [
         "fiba3x3.com",
         "play.fiba3x3.com",
     ]
 
-    domain_ok = any(
-        domain in link.lower()
-        for domain in allowed_domains
-    )
-
-    # =========================
-    # SEÑALES POSITIVAS
-    # =========================
+    domain_ok = any(domain in link.lower() for domain in allowed_domains)
 
     positive_signals = [
         "fiba 3x3",
@@ -247,9 +228,10 @@ def is_valid_event(title, summary, link):
     if domain_ok:
         score += 2
 
-    # =========================
-    # REGLA FINAL
-    # =========================
+    future_date_found = any(month.lower() in text for month in MONTHS)
+
+    if not future_date_found:
+        return False
 
     if score < 3:
         return False
@@ -257,46 +239,25 @@ def is_valid_event(title, summary, link):
     return True
 
 
-# =========================
-# BÚSQUEDA
-# =========================
-
 def search_events():
-
     events = []
 
     for category, query in SEARCHES.items():
-
-        rss_url = (
-            f"https://www.bing.com/search?"
-            f"q={quote_plus(query)}&format=rss"
-        )
-
+        rss_url = f"https://www.bing.com/search?q={quote_plus(query)}&format=rss"
         feed = feedparser.parse(rss_url)
 
         for entry in feed.entries:
-
             title = entry.get("title", "").strip()
             link = entry.get("link", "").strip()
             summary = entry.get("summary", "").strip()
 
-            if not is_valid_event(
-                title,
-                summary,
-                link
-            ):
+            if not is_valid_event(title, summary, link):
                 continue
 
-            score, label, notes = score_event(
-                title,
-                summary
-            )
+            score, label, notes = score_event(title, summary)
 
             original_text = f"{title}\n{summary}"
-
-            translation = translate_to_spanish(
-                original_text
-            )
+            translation = translate_to_spanish(original_text)
 
             events.append({
                 "id": link,
@@ -307,38 +268,24 @@ def search_events():
                 "translation": translation,
                 "score": score,
                 "label": label,
-                "notes": notes
+                "notes": notes,
             })
-
-    # =========================
-    # ELIMINAR DUPLICADOS
-    # =========================
 
     unique = []
     seen_links = set()
 
     for e in events:
-
         if e["id"] not in seen_links:
             unique.append(e)
             seen_links.add(e["id"])
 
-    unique.sort(
-        key=lambda x: x["score"],
-        reverse=True
-    )
+    unique.sort(key=lambda x: x["score"], reverse=True)
 
     return unique
 
 
-# =========================
-# MAIN
-# =========================
-
 def main():
-
     seen = load_seen()
-
     current = search_events()
 
     new_events = [
@@ -346,73 +293,35 @@ def main():
         if e["id"] not in seen
     ]
 
-    # =========================
-    # NO ENVIAR BASURA
-    # =========================
-
     if not new_events:
-        print("No hay torneos reales hoy.")
+        print("No hay torneos futuros reales hoy.")
+        save_seen([e["id"] for e in current])
         return
 
-    body = (
-        "🏀 NUEVOS POSIBLES TORNEOS 3x3\n\n"
-    )
-
-    body += (
-        "Resultados filtrados automáticamente.\n"
-    )
-
-    body += (
-        "⚠️ Verificar inscripción, fecha y nivel.\n\n"
-    )
+    body = "🏀 NUEVOS POSIBLES TORNEOS 3x3 FUTUROS\n\n"
+    body += "Resultados filtrados automáticamente.\n"
+    body += "⚠️ Verificar inscripción, fecha y nivel antes de decidir.\n\n"
 
     for e in new_events:
-
         body += f"{e['name']}\n"
-        body += (
-            f"🏆 Fuente: {e['type']}\n"
-        )
-
-        body += (
-            f"📊 Score: {e['score']}/100\n"
-        )
-
-        body += (
-            f"🎯 Lectura: {e['label']}\n"
-        )
+        body += f"🏆 Fuente: {e['type']}\n"
+        body += f"📊 Score: {e['score']}/100\n"
+        body += f"🎯 Lectura: {e['label']}\n"
 
         if e["notes"]:
-            body += (
-                "🧠 Señales: "
-                + "; ".join(e["notes"])
-                + "\n"
-            )
+            body += "🧠 Señales: " + "; ".join(e["notes"]) + "\n"
 
-        body += (
-            f"\n🌍 Original:\n"
-            f"{e['summary'][:500]}\n"
-        )
-
-        body += (
-            f"\n🇪🇸 Traducción:\n"
-            f"{e['translation'][:700]}\n"
-        )
-
-        body += (
-            f"\n🔗 {e['link']}\n\n"
-        )
-
-        body += (
-            "-----------------------------\n\n"
-        )
+        body += f"\n🌍 Original:\n{e['summary'][:500]}\n"
+        body += f"\n🇪🇸 Traducción:\n{e['translation'][:700]}\n"
+        body += f"\n🔗 {e['link']}\n\n"
+        body += "-----------------------------\n\n"
 
     send_email(
-        "🏀 Nuevos torneos 3x3 detectados",
-        body
+        "🏀 Nuevos torneos 3x3 futuros detectados",
+        body,
     )
 
     current_ids = [e["id"] for e in current]
-
     save_seen(current_ids)
 
 
