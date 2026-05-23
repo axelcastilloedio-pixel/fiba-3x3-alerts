@@ -1,61 +1,69 @@
 import os
-import requests
+import json
 import smtplib
+import requests
+import feedparser
 from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
-from datetime import datetime
+from urllib.parse import quote_plus
 
+SEEN_FILE = "seen_events.json"
 
-# =========================
-# CONFIGURACIÓN
-# =========================
+EMAIL_USER = os.environ["EMAIL_USER"]
+EMAIL_PASS = os.environ["EMAIL_PASS"]
+EMAIL_TO = os.environ["EMAIL_TO"]
 
-SEARCH_TERMS = [
-    '"FIBA 3x3 Quest"',
-    '"3x3 basketball quest"',
-    '"FIBA 3x3 Challenger"',
-    '"FIBA 3x3 Satellite"',
-    '"3x3 basketball tournament registration"',
-    '"3x3 basketball qualifier"',
-    'site:fiba3x3.com quest',
-    'site:play.fiba3x3.com 3x3 tournament',
+SEARCHES = {
+    "QUEST": 'site:play.fiba3x3.com/events QUEST "FIBA 3x3"',
+    "LITE QUEST": 'site:play.fiba3x3.com/events "Lite Quest" "FIBA 3x3"',
+    "GLOBAL_QUEST": '"3x3 basketball" Quest "FIBA 3x3"',
+    "BALKANS": '"3x3 turnir" Quest OR Bosnia OR Serbia OR Croatia',
+    "RUSSIAN": '"3x3 турнир" Quest OR "ФИБА 3x3"',
+    "SPANISH": '"torneo 3x3" Quest OR "FIBA 3x3"',
+    "PORTUGUESE": '"torneio 3x3" Quest OR "FIBA 3x3"',
+    "FRENCH": '"tournoi 3x3" Quest OR "FIBA 3x3"',
+}
+
+HARD_SIGNALS = [
+    "Amsterdam",
+    "Ub",
+    "Liman",
+    "Vienna",
+    "Lausanne",
+    "Serbia",
+    "Belgrade",
+    "Partizan",
+    "Riffa",
+    "Paris",
+    "Ulaanbaatar",
+    "Mongolia"
 ]
 
-BLACKLIST = [
-    "meta quest",
-    "oculus",
-    "virtual reality",
-    "vr headset",
-    "quest diagnostics",
-    "myquest",
-    "appointment",
-    "lab test",
-    "health",
-    "amazon",
-    "google play",
-    "app store",
-    "times tables",
-    "game",
+GOOD_SIGNALS = [
+    "Lite Quest",
+    "Chile",
+    "Malaysia",
+    "Philippines",
+    "Korea",
+    "Kosovo",
+    "Romania",
+    "Portugal",
+    "Greece",
+    "Bosnia",
+    "Prnjavor",
+    "Croatia"
 ]
 
-POSITIVE_SIGNALS = [
-    "fiba 3x3",
-    "3x3 basketball",
-    "challenger",
-    "quest",
-    "satellite",
-    "qualifier",
-    "registration",
-    "teams",
-    "prize",
-    "tournament",
-    "basketball",
-]
-
-ALLOWED_DOMAINS = [
-    "fiba3x3.com",
-    "play.fiba3x3.com",
-    "3x3planet.com",
+MONTHS = [
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "Mayo",
+    "Junio",
+    "Julio",
+    "Agosto",
+    "Septiembre",
 ]
 
 
@@ -63,87 +71,185 @@ ALLOWED_DOMAINS = [
 # EMAIL
 # =========================
 
-EMAIL_FROM = os.getenv("EMAIL_FROM")
-EMAIL_TO = os.getenv("EMAIL_TO")
-EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD")
-SMTP_SERVER = os.getenv("SMTP_SERVER", "smtp.gmail.com")
-SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
+def send_email(subject, body):
+    msg = MIMEText(body, "plain", "utf-8")
+    msg["Subject"] = subject
+    msg["From"] = EMAIL_USER
+    msg["To"] = EMAIL_TO
+
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
+        smtp.login(EMAIL_USER, EMAIL_PASS)
+        smtp.send_message(msg)
 
 
 # =========================
-# SERPAPI / BÚSQUEDA
+# ARCHIVO DE EVENTOS
 # =========================
 
-SERPAPI_KEY = os.getenv("SERPAPI_KEY")
+def load_seen():
+    try:
+        with open(SEEN_FILE, "r") as f:
+            return json.load(f)
+    except:
+        return []
 
 
-def search_google(query):
-    url = "https://serpapi.com/search"
-
-    params = {
-        "engine": "google",
-        "q": query,
-        "api_key": SERPAPI_KEY,
-        "num": 10,
-        "hl": "en",
-    }
-
-    response = requests.get(url, params=params, timeout=20)
-    response.raise_for_status()
-
-    data = response.json()
-    return data.get("organic_results", [])
+def save_seen(data):
+    with open(SEEN_FILE, "w") as f:
+        json.dump(data, f)
 
 
 # =========================
-# FILTROS
+# TRADUCCIÓN
 # =========================
 
-def is_blacklisted(text):
-    text = text.lower()
+def translate_to_spanish(text):
+    if not text.strip():
+        return ""
 
-    for word in BLACKLIST:
-        if word in text:
-            return True
+    try:
+        url = "https://api.mymemory.translated.net/get"
 
-    return False
+        params = {
+            "q": text[:450],
+            "langpair": "en|es"
+        }
+
+        response = requests.get(url, params=params, timeout=20)
+        data = response.json()
+
+        translated = data.get("responseData", {}).get(
+            "translatedText",
+            ""
+        )
+
+        if translated:
+            return translated
+
+    except Exception:
+        pass
+
+    return "Traducción no disponible automáticamente."
 
 
-def positive_score(text):
-    text = text.lower()
+# =========================
+# SCORE
+# =========================
+
+def score_event(title, summary):
+    text = f"{title} {summary}"
+
+    score = 50
+    notes = []
+
+    for word in HARD_SIGNALS:
+        if word.lower() in text.lower():
+            score -= 20
+            notes.append(f"riesgo alto: {word}")
+
+    for word in GOOD_SIGNALS:
+        if word.lower() in text.lower():
+            score += 15
+            notes.append(f"señal favorable: {word}")
+
+    if "lite quest" in text.lower():
+        score += 20
+        notes.append("Lite Quest suele ser más accesible")
+
+    if not any(m.lower() in text.lower() for m in MONTHS):
+        notes.append("fecha/mes no confirmado")
+
+    score = max(0, min(100, score))
+
+    if score >= 75:
+        label = "🟢 OPORTUNIDAD ALTA"
+    elif score >= 55:
+        label = "🟡 INTERESANTE"
+    elif score >= 35:
+        label = "🟠 REVISAR"
+    else:
+        label = "🔴 EVITAR"
+
+    return score, label, notes
+
+
+# =========================
+# FILTRO ANTI BASURA
+# =========================
+
+def is_valid_event(title, summary, link):
+
+    text = f"{title} {summary} {link}".lower()
+
+    # =========================
+    # BLACKLIST
+    # =========================
+
+    blacklist = [
+        "meta quest",
+        "quest diagnostics",
+        "oculus",
+        "virtual reality",
+        "vr headset",
+        "google play",
+        "app store",
+        "amazon",
+        "health",
+        "lab",
+        "appointment",
+        "times tables",
+        "game",
+        "youtube",
+        "myquest",
+    ]
+
+    for bad in blacklist:
+        if bad in text:
+            return False
+
+    # =========================
+    # DOMINIOS BUENOS
+    # =========================
+
+    allowed_domains = [
+        "fiba3x3.com",
+        "play.fiba3x3.com",
+    ]
+
+    domain_ok = any(
+        domain in link.lower()
+        for domain in allowed_domains
+    )
+
+    # =========================
+    # SEÑALES POSITIVAS
+    # =========================
+
+    positive_signals = [
+        "fiba 3x3",
+        "3x3 basketball",
+        "quest",
+        "lite quest",
+        "challenger",
+        "satellite",
+        "qualifier",
+        "tournament",
+        "registration",
+        "teams",
+    ]
+
     score = 0
 
-    for signal in POSITIVE_SIGNALS:
+    for signal in positive_signals:
         if signal in text:
             score += 1
 
-    return score
+    if domain_ok:
+        score += 2
 
-
-def has_allowed_domain(url):
-    url = url.lower()
-
-    for domain in ALLOWED_DOMAINS:
-        if domain in url:
-            return True
-
-    return False
-
-
-def is_real_tournament_candidate(result):
-    title = result.get("title", "")
-    snippet = result.get("snippet", "")
-    url = result.get("link", "")
-
-    full_text = f"{title} {snippet} {url}".lower()
-
-    if is_blacklisted(full_text):
-        return False
-
-    score = positive_score(full_text)
-
-    if has_allowed_domain(url):
-        score += 3
+    # =========================
+    # REGLA FINAL
+    # =========================
 
     if score < 3:
         return False
@@ -152,52 +258,77 @@ def is_real_tournament_candidate(result):
 
 
 # =========================
-# EMAIL
+# BÚSQUEDA
 # =========================
 
-def build_email(results):
-    today = datetime.now().strftime("%d/%m/%Y")
+def search_events():
 
-    html = f"""
-    <h2>🏀 Torneos 3x3 detectados - {today}</h2>
-    <p>Solo se incluyen resultados que han pasado filtros mínimos de torneo real.</p>
-    <hr>
-    """
+    events = []
 
-    for item in results:
-        title = item.get("title", "Sin título")
-        snippet = item.get("snippet", "Sin descripción")
-        url = item.get("link", "")
+    for category, query in SEARCHES.items():
 
-        html += f"""
-        <h3>{title}</h3>
-        <p>{snippet}</p>
-        <p><a href="{url}">{url}</a></p>
-        <hr>
-        """
+        rss_url = (
+            f"https://www.bing.com/search?"
+            f"q={quote_plus(query)}&format=rss"
+        )
 
-    return html
+        feed = feedparser.parse(rss_url)
 
+        for entry in feed.entries:
 
-def send_email(results):
-    if not results:
-        print("No hay torneos reales hoy. No se envía email.")
-        return
+            title = entry.get("title", "").strip()
+            link = entry.get("link", "").strip()
+            summary = entry.get("summary", "").strip()
 
-    msg = MIMEMultipart("alternative")
-    msg["Subject"] = "🏀 Nuevos posibles torneos reales 3x3"
-    msg["From"] = EMAIL_FROM
-    msg["To"] = EMAIL_TO
+            if not is_valid_event(
+                title,
+                summary,
+                link
+            ):
+                continue
 
-    html = build_email(results)
-    msg.attach(MIMEText(html, "html"))
+            score, label, notes = score_event(
+                title,
+                summary
+            )
 
-    with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
-        server.starttls()
-        server.login(EMAIL_FROM, EMAIL_PASSWORD)
-        server.sendmail(EMAIL_FROM, EMAIL_TO, msg.as_string())
+            original_text = f"{title}\n{summary}"
 
-    print(f"Email enviado con {len(results)} resultados.")
+            translation = translate_to_spanish(
+                original_text
+            )
+
+            events.append({
+                "id": link,
+                "name": title,
+                "type": category,
+                "link": link,
+                "summary": summary,
+                "translation": translation,
+                "score": score,
+                "label": label,
+                "notes": notes
+            })
+
+    # =========================
+    # ELIMINAR DUPLICADOS
+    # =========================
+
+    unique = []
+    seen_links = set()
+
+    for e in events:
+
+        if e["id"] not in seen_links:
+            unique.append(e)
+            seen_links.add(e["id"])
+
+    unique.sort(
+        key=lambda x: x["score"],
+        reverse=True
+    )
+
+    return unique
 
 
 # =========================
@@ -205,39 +336,84 @@ def send_email(results):
 # =========================
 
 def main():
-    if not SERPAPI_KEY:
-        raise ValueError("Falta SERPAPI_KEY")
 
-    if not EMAIL_FROM or not EMAIL_TO or not EMAIL_PASSWORD:
-        raise ValueError("Faltan datos de email")
+    seen = load_seen()
 
-    valid_results = []
-    seen_urls = set()
+    current = search_events()
 
-    for query in SEARCH_TERMS:
-        print(f"Buscando: {query}")
+    new_events = [
+        e for e in current
+        if e["id"] not in seen
+    ]
 
-        try:
-            results = search_google(query)
-        except Exception as e:
-            print(f"Error buscando {query}: {e}")
-            continue
+    # =========================
+    # NO ENVIAR BASURA
+    # =========================
 
-        for result in results:
-            url = result.get("link", "")
+    if not new_events:
+        print("No hay torneos reales hoy.")
+        return
 
-            if not url or url in seen_urls:
-                continue
+    body = (
+        "🏀 NUEVOS POSIBLES TORNEOS 3x3\n\n"
+    )
 
-            seen_urls.add(url)
+    body += (
+        "Resultados filtrados automáticamente.\n"
+    )
 
-            if is_real_tournament_candidate(result):
-                valid_results.append(result)
+    body += (
+        "⚠️ Verificar inscripción, fecha y nivel.\n\n"
+    )
 
-    if valid_results:
-        send_email(valid_results)
-    else:
-        print("No hay torneos reales hoy. No se envía email.")
+    for e in new_events:
+
+        body += f"{e['name']}\n"
+        body += (
+            f"🏆 Fuente: {e['type']}\n"
+        )
+
+        body += (
+            f"📊 Score: {e['score']}/100\n"
+        )
+
+        body += (
+            f"🎯 Lectura: {e['label']}\n"
+        )
+
+        if e["notes"]:
+            body += (
+                "🧠 Señales: "
+                + "; ".join(e["notes"])
+                + "\n"
+            )
+
+        body += (
+            f"\n🌍 Original:\n"
+            f"{e['summary'][:500]}\n"
+        )
+
+        body += (
+            f"\n🇪🇸 Traducción:\n"
+            f"{e['translation'][:700]}\n"
+        )
+
+        body += (
+            f"\n🔗 {e['link']}\n\n"
+        )
+
+        body += (
+            "-----------------------------\n\n"
+        )
+
+    send_email(
+        "🏀 Nuevos torneos 3x3 detectados",
+        body
+    )
+
+    current_ids = [e["id"] for e in current]
+
+    save_seen(current_ids)
 
 
 if __name__ == "__main__":
