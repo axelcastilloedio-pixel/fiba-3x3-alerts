@@ -13,29 +13,66 @@ EMAIL_PASS = os.environ["EMAIL_PASS"]
 EMAIL_TO = os.environ["EMAIL_TO"]
 
 SEARCHES = {
-    "QUEST": 'site:play.fiba3x3.com/events QUEST "FIBA 3x3" 2026',
-    "LITE QUEST": 'site:play.fiba3x3.com/events "Lite Quest" "FIBA 3x3" 2026',
-    "GLOBAL_QUEST": '"3x3 basketball" Quest "FIBA 3x3" 2026',
-    "BALKANS": '"3x3 turnir" Quest 2026 OR Bosnia OR Serbia OR Croatia',
-    "RUSSIAN": '"3x3 турнир" Quest 2026 OR "ФИБА 3x3"',
-    "SPANISH": '"torneo 3x3" Quest 2026 OR "FIBA 3x3"',
-    "PORTUGUESE": '"torneio 3x3" Quest 2026 OR "FIBA 3x3"',
-    "FRENCH": '"tournoi 3x3" Quest 2026 OR "FIBA 3x3"',
+    "FIBA QUEST": 'site:play.fiba3x3.com/events Quest "FIBA 3x3"',
+    "FIBA LITE QUEST": 'site:play.fiba3x3.com/events "Lite Quest"',
+    "FIBA CHALLENGER": 'site:play.fiba3x3.com/events Challenger "FIBA 3x3"',
+    "FIBA SATELLITE": 'site:play.fiba3x3.com/events Satellite "FIBA 3x3"',
+    "GLOBAL QUEST": '"3x3 basketball" "Quest" "FIBA 3x3" 2026',
+    "SPANISH": '"torneo 3x3" "Quest" "FIBA 3x3" 2026',
+    "PORTUGUESE": '"torneio 3x3" "Quest" "FIBA 3x3" 2026',
+    "FRENCH": '"tournoi 3x3" "Quest" "FIBA 3x3" 2026',
+    "BALKANS": '"3x3 turnir" "Quest" "FIBA 3x3" 2026',
 }
 
-HARD_SIGNALS = [
-    "Amsterdam",
-    "Ub",
-    "Liman",
-    "Vienna",
-    "Lausanne",
-    "Serbia",
-    "Belgrade",
-    "Partizan",
-    "Riffa",
-    "Paris",
-    "Ulaanbaatar",
-    "Mongolia",
+BLACKLIST = [
+    "meta quest",
+    "quest diagnostics",
+    "oculus",
+    "virtual reality",
+    "vr headset",
+    "google play",
+    "app store",
+    "amazon",
+    "health",
+    "lab",
+    "appointment",
+    "times tables",
+    "game",
+    "youtube",
+    "myquest",
+]
+
+STRONG_SIGNALS = [
+    "fiba 3x3",
+    "play.fiba3x3.com",
+    "lite quest",
+    "challenger",
+    "satellite",
+    "qualifier",
+    "registration",
+    "teams",
+    "tournament",
+    "3x3 basketball",
+]
+
+FUTURE_SIGNALS = [
+    "2026",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+    "Mayo",
+    "Junio",
+    "Julio",
+    "Agosto",
+    "Septiembre",
+    "Octubre",
+    "Noviembre",
+    "Diciembre",
 ]
 
 GOOD_SIGNALS = [
@@ -53,37 +90,19 @@ GOOD_SIGNALS = [
     "Croatia",
 ]
 
-MONTHS = [
-    "May",
-    "June",
-    "July",
-    "August",
-    "September",
-    "October",
-    "November",
-    "December",
-    "2026",
-
-    "Mayo",
-    "Junio",
-    "Julio",
-    "Agosto",
-    "Septiembre",
-    "Octubre",
-    "Noviembre",
-    "Diciembre",
-
-    "Maj",
-    "Jun",
-    "Jul",
-    "Avgust",
-    "Septembar",
-
-    "Μάιος",
-    "Ιούνιος",
-    "Ιούλιος",
-    "Αύγουστος",
-    "Σεπτέμβριος",
+HARD_SIGNALS = [
+    "Amsterdam",
+    "Ub",
+    "Liman",
+    "Vienna",
+    "Lausanne",
+    "Serbia",
+    "Belgrade",
+    "Partizan",
+    "Riffa",
+    "Paris",
+    "Ulaanbaatar",
+    "Mongolia",
 ]
 
 
@@ -117,7 +136,6 @@ def translate_to_spanish(text):
 
     try:
         url = "https://api.mymemory.translated.net/get"
-
         params = {
             "q": text[:450],
             "langpair": "en|es",
@@ -137,28 +155,82 @@ def translate_to_spanish(text):
     return "Traducción no disponible automáticamente."
 
 
-def score_event(title, summary):
-    text = f"{title} {summary}"
+def contains_any(text, words):
+    text = text.lower()
+    return any(word.lower() in text for word in words)
+
+
+def count_signals(text, words):
+    text = text.lower()
+    total = 0
+
+    for word in words:
+        if word.lower() in text:
+            total += 1
+
+    return total
+
+
+def is_valid_event(title, summary, link):
+    text = f"{title} {summary} {link}".lower()
+
+    if contains_any(text, BLACKLIST):
+        return False
+
+    is_fiba_domain = (
+        "play.fiba3x3.com" in link.lower()
+        or "fiba3x3.com" in link.lower()
+    )
+
+    strong_score = count_signals(text, STRONG_SIGNALS)
+    has_future_signal = contains_any(text, FUTURE_SIGNALS)
+
+    # Regla principal:
+    # 1) Si tiene fecha futura y señales fuertes, pasa.
+    if has_future_signal and strong_score >= 2:
+        return True
+
+    # 2) Si viene de FIBA/play.fiba3x3 y tiene señales fuertes, pasa aunque Bing no muestre fecha.
+    if is_fiba_domain and strong_score >= 2:
+        return True
+
+    # 3) Todo lo demás se descarta.
+    return False
+
+
+def score_event(title, summary, link):
+    text = f"{title} {summary} {link}"
 
     score = 50
     notes = []
 
-    for word in HARD_SIGNALS:
-        if word.lower() in text.lower():
-            score -= 20
-            notes.append(f"riesgo alto: {word}")
+    if "play.fiba3x3.com" in link.lower():
+        score += 25
+        notes.append("dominio oficial FIBA/play.fiba3x3")
+
+    if contains_any(text, FUTURE_SIGNALS):
+        score += 15
+        notes.append("fecha futura detectada")
+    else:
+        notes.append("fecha no visible en Bing; revisar enlace")
 
     for word in GOOD_SIGNALS:
         if word.lower() in text.lower():
-            score += 15
+            score += 10
             notes.append(f"señal favorable: {word}")
+
+    for word in HARD_SIGNALS:
+        if word.lower() in text.lower():
+            score -= 15
+            notes.append(f"posible nivel alto: {word}")
 
     if "lite quest" in text.lower():
         score += 20
         notes.append("Lite Quest suele ser más accesible")
 
-    if not any(m.lower() in text.lower() for m in MONTHS):
-        notes.append("fecha futura no confirmada")
+    if "challenger" in text.lower():
+        score -= 10
+        notes.append("Challenger suele tener nivel alto")
 
     score = max(0, min(100, score))
 
@@ -172,71 +244,6 @@ def score_event(title, summary):
         label = "🔴 EVITAR"
 
     return score, label, notes
-
-
-def is_valid_event(title, summary, link):
-    text = f"{title} {summary} {link}".lower()
-
-    blacklist = [
-        "meta quest",
-        "quest diagnostics",
-        "oculus",
-        "virtual reality",
-        "vr headset",
-        "google play",
-        "app store",
-        "amazon",
-        "health",
-        "lab",
-        "appointment",
-        "times tables",
-        "game",
-        "youtube",
-        "myquest",
-    ]
-
-    for bad in blacklist:
-        if bad in text:
-            return False
-
-    allowed_domains = [
-        "fiba3x3.com",
-        "play.fiba3x3.com",
-    ]
-
-    domain_ok = any(domain in link.lower() for domain in allowed_domains)
-
-    positive_signals = [
-        "fiba 3x3",
-        "3x3 basketball",
-        "quest",
-        "lite quest",
-        "challenger",
-        "satellite",
-        "qualifier",
-        "tournament",
-        "registration",
-        "teams",
-    ]
-
-    score = 0
-
-    for signal in positive_signals:
-        if signal in text:
-            score += 1
-
-    if domain_ok:
-        score += 2
-
-    future_date_found = any(month.lower() in text for month in MONTHS)
-
-    if not future_date_found:
-        return False
-
-    if score < 3:
-        return False
-
-    return True
 
 
 def search_events():
@@ -254,7 +261,7 @@ def search_events():
             if not is_valid_event(title, summary, link):
                 continue
 
-            score, label, notes = score_event(title, summary)
+            score, label, notes = score_event(title, summary, link)
 
             original_text = f"{title}\n{summary}"
             translation = translate_to_spanish(original_text)
@@ -294,13 +301,13 @@ def main():
     ]
 
     if not new_events:
-        print("No hay torneos futuros reales hoy.")
+        print("No hay nuevos torneos 3x3 válidos hoy.")
         save_seen([e["id"] for e in current])
         return
 
-    body = "🏀 NUEVOS POSIBLES TORNEOS 3x3 FUTUROS\n\n"
-    body += "Resultados filtrados automáticamente.\n"
-    body += "⚠️ Verificar inscripción, fecha y nivel antes de decidir.\n\n"
+    body = "🏀 NUEVOS POSIBLES TORNEOS 3x3\n\n"
+    body += "Filtro equilibrado: prioriza eventos futuros, pero permite enlaces oficiales FIBA aunque Bing no muestre fecha.\n"
+    body += "⚠️ Verificar inscripción, fecha, ciudad, país y nivel antes de decidir.\n\n"
 
     for e in new_events:
         body += f"{e['name']}\n"
@@ -317,7 +324,7 @@ def main():
         body += "-----------------------------\n\n"
 
     send_email(
-        "🏀 Nuevos torneos 3x3 futuros detectados",
+        "🏀 Nuevos torneos 3x3 detectados",
         body,
     )
 
